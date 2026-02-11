@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Pi Backup daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

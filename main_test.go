@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,14 +22,19 @@ func TestDryRun(t *testing.T) {
 		t.Fatalf("build failed: %v\n%s", err, out)
 	}
 
+	// Create a directory with known contents to back up
+	backupSource := filepath.Join(dir, "testdata")
+	os.MkdirAll(backupSource, 0755)
+	os.WriteFile(filepath.Join(backupSource, "hello.txt"), []byte("hello"), 0644)
+
 	// Write a test config
 	configPath := filepath.Join(dir, "config.yaml")
-	os.WriteFile(configPath, []byte(`hostname: test
+	os.WriteFile(configPath, []byte(fmt.Sprintf(`hostname: test
 bucket: test-bucket
 region: us-east-1
 directories:
-  - /tmp
-`), 0644)
+  - %s
+`, backupSource)), 0644)
 
 	// Run with --dry-run (should succeed without AWS credentials)
 	cmd := exec.Command(bin, "--config", configPath, "--dry-run")
@@ -54,13 +60,17 @@ func TestMissingAWSCredentials(t *testing.T) {
 		t.Fatalf("build failed: %v\n%s", err, out)
 	}
 
+	backupSource := filepath.Join(dir, "testdata")
+	os.MkdirAll(backupSource, 0755)
+	os.WriteFile(filepath.Join(backupSource, "hello.txt"), []byte("hello"), 0644)
+
 	configPath := filepath.Join(dir, "config.yaml")
-	os.WriteFile(configPath, []byte(`hostname: test
+	os.WriteFile(configPath, []byte(fmt.Sprintf(`hostname: test
 bucket: test-bucket
 region: us-east-1
 directories:
-  - /tmp
-`), 0644)
+  - %s
+`, backupSource)), 0644)
 
 	// Run without AWS credentials — should fail
 	cmd := exec.Command(bin, "--config", configPath)

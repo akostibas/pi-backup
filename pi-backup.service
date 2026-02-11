@@ -1,0 +1,9 @@
+[Unit]
+Description=Pi Backup - back up directories to S3
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pi-backup
+EnvironmentFile=/opt/pi-backup/env

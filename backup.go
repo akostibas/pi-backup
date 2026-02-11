@@ -46,6 +46,13 @@ func CreateArchive(w io.Writer, dir string) error {
 			return err
 		}
 
+		// Skip sockets and device files — tar doesn't support them
+		// and they commonly appear in directories like /tmp.
+		mode := info.Mode()
+		if mode&os.ModeSocket != 0 || mode&os.ModeDevice != 0 || mode&os.ModeCharDevice != 0 {
+			return nil
+		}
+
 		// Build relative path starting from the base directory name
 		rel, err := filepath.Rel(filepath.Dir(dir), path)
 		if err != nil {

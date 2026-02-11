@@ -22,6 +22,28 @@ directories:
 
 AWS credentials must be set as environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`). When running via systemd, use an `EnvironmentFile`.
 
+## Systemd
+
+Sample unit files are included in the repo:
+
+- [`pi-backup.service`](pi-backup.service) -- oneshot service that runs the backup
+- [`pi-backup.timer`](pi-backup.timer) -- daily timer with randomized delay
+
+To install:
+
+```bash
+sudo cp pi-backup.service pi-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-backup.timer
+```
+
+Create `/opt/pi-backup/env` with your AWS credentials:
+
+```
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+```
+
 ## Usage
 
 ### Backup (default)
