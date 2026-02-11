@@ -102,3 +102,27 @@ func TestCreateArchive(t *testing.T) {
 		t.Errorf("file2.txt content = %q, want %q", contents["config/nested/file2.txt"], "world")
 	}
 }
+
+func TestCreateArchiveDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "data")
+	os.MkdirAll(filepath.Join(subdir, "sub"), 0755)
+	os.WriteFile(filepath.Join(subdir, "a.txt"), []byte("aaa"), 0644)
+	os.WriteFile(filepath.Join(subdir, "sub", "b.txt"), []byte("bbb"), 0644)
+
+	var buf1, buf2 bytes.Buffer
+	if err := CreateArchive(&buf1, subdir); err != nil {
+		t.Fatalf("first CreateArchive: %v", err)
+	}
+
+	// Small delay so atime/ctime would differ if not zeroed
+	time.Sleep(10 * time.Millisecond)
+
+	if err := CreateArchive(&buf2, subdir); err != nil {
+		t.Fatalf("second CreateArchive: %v", err)
+	}
+
+	if !bytes.Equal(buf1.Bytes(), buf2.Bytes()) {
+		t.Error("CreateArchive produced different output for identical files")
+	}
+}

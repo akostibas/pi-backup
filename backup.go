@@ -57,6 +57,8 @@ func CreateArchive(w io.Writer, dir string) error {
 			return err
 		}
 		header.Name = rel
+		header.AccessTime = time.Time{}
+		header.ChangeTime = time.Time{}
 
 		// Handle symlinks
 		if info.Mode()&os.ModeSymlink != 0 {
