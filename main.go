@@ -12,19 +12,46 @@ import (
 var version = "dev"
 
 func main() {
-	configPath := flag.String("config", "/opt/pi-backup/config.yaml", "path to config file")
-	dryRun := flag.Bool("dry-run", false, "log planned uploads without uploading")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	log.SetFlags(0) // systemd/journald adds its own timestamps
 
-	if *showVersion {
+	// Check for --version before anything else
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
 		fmt.Println(version)
 		os.Exit(0)
 	}
 
-	log.SetFlags(0) // systemd/journald adds its own timestamps
+	// Parse --config from the beginning of args (before subcommand)
+	configPath := "/opt/pi-backup/config.yaml"
+	restArgs := os.Args[1:]
+	for i := 0; i < len(restArgs); i++ {
+		if restArgs[i] == "--config" || restArgs[i] == "-config" {
+			if i+1 < len(restArgs) {
+				configPath = restArgs[i+1]
+				restArgs = append(restArgs[:i], restArgs[i+2:]...)
+				break
+			}
+		}
+	}
 
-	cfg, err := LoadConfig(*configPath)
+	// Route to restore subcommand
+	if len(restArgs) > 0 && restArgs[0] == "restore" {
+		cfg, err := LoadConfig(configPath)
+		if err != nil {
+			log.Fatalf("error: %v", err)
+		}
+		if os.Getenv("AWS_ACCESS_KEY_ID") == "" || os.Getenv("AWS_SECRET_ACCESS_KEY") == "" {
+			log.Fatal("error: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set")
+		}
+		runRestore(cfg, restArgs[1:])
+		return
+	}
+
+	// Default: backup mode (use flag package for remaining flags)
+	fs := flag.NewFlagSet("backup", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "log planned uploads without uploading")
+	fs.Parse(restArgs)
+
+	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		log.Fatalf("error: %v", err)
 	}
