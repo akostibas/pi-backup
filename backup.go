@@ -32,9 +32,15 @@ func S3Key(hostname, dir string, t time.Time) string {
 	return fmt.Sprintf("%s/%s/%s.tar.gz", hostname, slug, ts)
 }
 
-// CreateArchive creates a tar.gz archive of dir and writes it to w.
-// Paths inside the archive are relative to dir's parent.
-func CreateArchive(w io.Writer, dir string) error {
+// CreateArchive creates a tar.gz archive of dir and writes it to w. Paths
+// inside the archive are relative to dir's parent.
+//
+// overrides maps an absolute live path to an absolute alternate-source path:
+// when the walk visits the live path, the file's metadata is preserved but
+// its bytes are read from the override (used for SQLite snapshots).
+//
+// excludes is a set of absolute paths to skip entirely. Both maps may be nil.
+func CreateArchive(w io.Writer, dir string, overrides map[string]string, excludes map[string]bool) error {
 	gw := gzip.NewWriter(w)
 	defer gw.Close()
 
@@ -44,6 +50,13 @@ func CreateArchive(w io.Writer, dir string) error {
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		if excludes[path] {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		// Skip sockets and device files — tar doesn't support them
@@ -59,11 +72,28 @@ func CreateArchive(w io.Writer, dir string) error {
 			return err
 		}
 
-		header, err := tar.FileInfoHeader(info, "")
+		// If this path has an override, the header size must match the
+		// override's bytes so tar's content-length is correct.
+		headerInfo := info
+		if src, ok := overrides[path]; ok {
+			si, err := os.Stat(src)
+			if err != nil {
+				return fmt.Errorf("stat override %s: %w", src, err)
+			}
+			headerInfo = si
+		}
+
+		header, err := tar.FileInfoHeader(headerInfo, "")
 		if err != nil {
 			return err
 		}
 		header.Name = rel
+		// For overrides, preserve the original file's mode/modtime — the
+		// override is a content swap, not a metadata swap.
+		if _, ok := overrides[path]; ok {
+			header.Mode = int64(info.Mode().Perm())
+			header.ModTime = info.ModTime()
+		}
 		header.AccessTime = time.Time{}
 		header.ChangeTime = time.Time{}
 
@@ -85,7 +115,11 @@ func CreateArchive(w io.Writer, dir string) error {
 			return nil
 		}
 
-		f, err := os.Open(path)
+		readPath := path
+		if src, ok := overrides[path]; ok {
+			readPath = src
+		}
+		f, err := os.Open(readPath)
 		if err != nil {
 			return err
 		}
