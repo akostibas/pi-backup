@@ -74,38 +74,38 @@ func main() {
 		log.Fatalf("error loading checksums: %v", err)
 	}
 
-	for _, dir := range cfg.Directories {
-		key := S3Key(cfg.Hostname, dir, now)
-		slug := PathSlug(dir)
+	for _, d := range cfg.Directories {
+		key := S3Key(cfg.Hostname, d.Path, now)
+		slug := PathSlug(d.Path)
 
-		archivePath, hash, err := createArchiveWithHash(dir)
+		archivePath, hash, err := createArchiveWithHash(d)
 		if err != nil {
-			log.Printf("error creating archive for %s: %v", dir, err)
-			failed = append(failed, dir)
+			log.Printf("error creating archive for %s: %v", d.Path, err)
+			failed = append(failed, d.Path)
 			continue
 		}
 
 		if checksums[slug] == hash {
 			if *dryRun {
-				log.Printf("[dry-run] would skip %s (unchanged)", dir)
+				log.Printf("[dry-run] would skip %s (unchanged)", d.Path)
 			} else {
-				log.Printf("skipping %s (unchanged)", dir)
+				log.Printf("skipping %s (unchanged)", d.Path)
 			}
 			os.Remove(archivePath)
 			continue
 		}
 
 		if *dryRun {
-			log.Printf("[dry-run] would upload %s -> s3://%s/%s", dir, cfg.Bucket, key)
+			log.Printf("[dry-run] would upload %s -> s3://%s/%s", d.Path, cfg.Bucket, key)
 			os.Remove(archivePath)
 			continue
 		}
 
-		log.Printf("backing up %s -> s3://%s/%s", dir, cfg.Bucket, key)
+		log.Printf("backing up %s -> s3://%s/%s", d.Path, cfg.Bucket, key)
 
 		if err := uploadArchive(ctx, cfg, key, archivePath); err != nil {
-			log.Printf("error backing up %s: %v", dir, err)
-			failed = append(failed, dir)
+			log.Printf("error backing up %s: %v", d.Path, err)
+			failed = append(failed, d.Path)
 			os.Remove(archivePath)
 			continue
 		}
@@ -116,7 +116,7 @@ func main() {
 			log.Printf("warning: failed to save checksums: %v", err)
 		}
 
-		log.Printf("completed %s", dir)
+		log.Printf("completed %s", d.Path)
 	}
 
 	if len(failed) > 0 {
@@ -124,16 +124,24 @@ func main() {
 	}
 }
 
-// createArchiveWithHash creates a temp archive for dir and returns
-// the temp file path and its SHA-256 hex digest.
-func createArchiveWithHash(dir string) (path string, hash string, err error) {
-	info, err := os.Stat(dir)
+// createArchiveWithHash takes online snapshots of any SQLite databases
+// declared in d, then creates a temp archive of d.Path with the snapshots
+// substituted for the live files. Returns the archive path and its
+// SHA-256 hex digest.
+func createArchiveWithHash(d Directory) (path string, hash string, err error) {
+	info, err := os.Stat(d.Path)
 	if err != nil {
 		return "", "", fmt.Errorf("accessing directory: %w", err)
 	}
 	if !info.IsDir() {
-		return "", "", fmt.Errorf("%s is not a directory", dir)
+		return "", "", fmt.Errorf("%s is not a directory", d.Path)
 	}
+
+	snap, err := PrepareSnapshots(d)
+	if err != nil {
+		return "", "", fmt.Errorf("preparing snapshots: %w", err)
+	}
+	defer snap.Cleanup()
 
 	tmpFile, err := os.CreateTemp("", "pi-backup-*.tar.gz")
 	if err != nil {
@@ -141,7 +149,7 @@ func createArchiveWithHash(dir string) (path string, hash string, err error) {
 	}
 	defer tmpFile.Close()
 
-	if err := CreateArchive(tmpFile, dir); err != nil {
+	if err := CreateArchive(tmpFile, d.Path, snap.Overrides, snap.Excludes); err != nil {
 		os.Remove(tmpFile.Name())
 		return "", "", fmt.Errorf("creating archive: %w", err)
 	}

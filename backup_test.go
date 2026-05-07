@@ -52,7 +52,7 @@ func TestCreateArchive(t *testing.T) {
 	os.WriteFile(filepath.Join(subdir, "nested", "file2.txt"), []byte("world"), 0644)
 
 	var buf bytes.Buffer
-	if err := CreateArchive(&buf, subdir); err != nil {
+	if err := CreateArchive(&buf, subdir, nil, nil); err != nil {
 		t.Fatalf("CreateArchive: %v", err)
 	}
 
@@ -111,14 +111,14 @@ func TestCreateArchiveDeterministic(t *testing.T) {
 	os.WriteFile(filepath.Join(subdir, "sub", "b.txt"), []byte("bbb"), 0644)
 
 	var buf1, buf2 bytes.Buffer
-	if err := CreateArchive(&buf1, subdir); err != nil {
+	if err := CreateArchive(&buf1, subdir, nil, nil); err != nil {
 		t.Fatalf("first CreateArchive: %v", err)
 	}
 
 	// Small delay so atime/ctime would differ if not zeroed
 	time.Sleep(10 * time.Millisecond)
 
-	if err := CreateArchive(&buf2, subdir); err != nil {
+	if err := CreateArchive(&buf2, subdir, nil, nil); err != nil {
 		t.Fatalf("second CreateArchive: %v", err)
 	}
 

@@ -17,7 +17,7 @@ func TestExtractArchive(t *testing.T) {
 
 	// Create archive
 	var buf bytes.Buffer
-	if err := CreateArchive(&buf, dataDir); err != nil {
+	if err := CreateArchive(&buf, dataDir, nil, nil); err != nil {
 		t.Fatalf("CreateArchive: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestExtractArchiveSingleFile(t *testing.T) {
 
 	// Create archive
 	var buf bytes.Buffer
-	if err := CreateArchive(&buf, dataDir); err != nil {
+	if err := CreateArchive(&buf, dataDir, nil, nil); err != nil {
 		t.Fatalf("CreateArchive: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestExtractArchiveNonexistentFile(t *testing.T) {
 
 	// Create archive
 	var buf bytes.Buffer
-	if err := CreateArchive(&buf, dataDir); err != nil {
+	if err := CreateArchive(&buf, dataDir, nil, nil); err != nil {
 		t.Fatalf("CreateArchive: %v", err)
 	}
 

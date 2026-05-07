@@ -33,7 +33,7 @@ func TestDryRun(t *testing.T) {
 bucket: test-bucket
 region: us-east-1
 directories:
-  - %s
+  - path: %s
 `, backupSource)), 0644)
 
 	// Run with --dry-run (should succeed without AWS credentials)
@@ -69,7 +69,7 @@ func TestMissingAWSCredentials(t *testing.T) {
 bucket: test-bucket
 region: us-east-1
 directories:
-  - %s
+  - path: %s
 `, backupSource)), 0644)
 
 	// Run without AWS credentials — should fail
