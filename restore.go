@@ -152,6 +152,17 @@ func ExtractArchive(r io.Reader, destDir, fileFilter string) error {
 			}
 		}
 
+		// Preserve uid/gid from the tar header. Use Lchown so symlinks are
+		// chowned themselves rather than their target. If the running user
+		// lacks privileges (e.g. non-root test runs, unknown uid), log and
+		// continue rather than aborting the whole restore — real restores
+		// run as root.
+		if hdr.Typeflag == tar.TypeDir || hdr.Typeflag == tar.TypeReg || hdr.Typeflag == tar.TypeSymlink {
+			if err := os.Lchown(target, hdr.Uid, hdr.Gid); err != nil {
+				log.Printf("warning: chown %s to %d:%d failed: %v", target, hdr.Uid, hdr.Gid, err)
+			}
+		}
+
 		if fileFilter != "" {
 			break // Found and extracted the requested file
 		}
