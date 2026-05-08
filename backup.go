@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -88,11 +89,21 @@ func CreateArchive(w io.Writer, dir string, overrides map[string]string, exclude
 			return err
 		}
 		header.Name = rel
-		// For overrides, preserve the original file's mode/modtime — the
-		// override is a content swap, not a metadata swap.
+		// For overrides, preserve the original file's mode/modtime/owner —
+		// the override is a content swap, not a metadata swap. The snapshot
+		// tempfile is owned by the process (root); without this fix the
+		// archived entry would lose the live file's uid/gid.
 		if _, ok := overrides[path]; ok {
 			header.Mode = int64(info.Mode().Perm())
 			header.ModTime = info.ModTime()
+			if st, ok := info.Sys().(*syscall.Stat_t); ok {
+				header.Uid = int(st.Uid)
+				header.Gid = int(st.Gid)
+				// Clear Uname/Gname so the numeric uid/gid wins on
+				// extraction (tar prefers the named owner when set).
+				header.Uname = ""
+				header.Gname = ""
+			}
 		}
 		header.AccessTime = time.Time{}
 		header.ChangeTime = time.Time{}

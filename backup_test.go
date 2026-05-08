@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -124,5 +125,143 @@ func TestCreateArchiveDeterministic(t *testing.T) {
 
 	if !bytes.Equal(buf1.Bytes(), buf2.Bytes()) {
 		t.Error("CreateArchive produced different output for identical files")
+	}
+}
+
+// TestCreateArchivePreservesUidGid verifies that tar headers carry the
+// on-disk uid/gid for plain (non-overridden) files.
+func TestCreateArchivePreservesUidGid(t *testing.T) {
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(subdir, "owned.txt")
+	if err := os.WriteFile(filePath, []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Skip("Stat_t unavailable on this platform")
+	}
+	wantUid, wantGid := int(sys.Uid), int(sys.Gid)
+
+	var buf bytes.Buffer
+	if err := CreateArchive(&buf, subdir, nil, nil); err != nil {
+		t.Fatalf("CreateArchive: %v", err)
+	}
+
+	gr, err := gzip.NewReader(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+	found := false
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hdr.Name == "data/owned.txt" {
+			found = true
+			if hdr.Uid != wantUid || hdr.Gid != wantGid {
+				t.Errorf("header uid/gid = %d/%d, want %d/%d",
+					hdr.Uid, hdr.Gid, wantUid, wantGid)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("data/owned.txt not found in archive")
+	}
+}
+
+// TestCreateArchiveOverridePreservesOriginalUidGid verifies that when an
+// override (e.g. SQLite snapshot) is supplied, the tar header still carries
+// the live file's uid/gid rather than the override tempfile's owner. This
+// is a regression test for Bug 1.
+func TestCreateArchiveOverridePreservesOriginalUidGid(t *testing.T) {
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Live file: this is what the walk visits.
+	livePath := filepath.Join(subdir, "live.db")
+	if err := os.WriteFile(livePath, []byte("LIVE"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override file in a different temp dir to ensure it's a distinct inode;
+	// tweak its mtime so we can confirm the live mtime won (existing
+	// behaviour) while we're at it.
+	overrideDir := t.TempDir()
+	overridePath := filepath.Join(overrideDir, "snapshot.db")
+	if err := os.WriteFile(overridePath, []byte("SNAPSHOTTED"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	differentTime := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(overridePath, differentTime, differentTime); err != nil {
+		t.Fatal(err)
+	}
+
+	liveSt, err := os.Stat(livePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveSys, ok := liveSt.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Skip("Stat_t unavailable on this platform")
+	}
+	wantUid, wantGid := int(liveSys.Uid), int(liveSys.Gid)
+
+	overrides := map[string]string{livePath: overridePath}
+
+	var buf bytes.Buffer
+	if err := CreateArchive(&buf, subdir, overrides, nil); err != nil {
+		t.Fatalf("CreateArchive: %v", err)
+	}
+
+	gr, err := gzip.NewReader(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+	found := false
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hdr.Name == "data/live.db" {
+			found = true
+			if hdr.Uid != wantUid || hdr.Gid != wantGid {
+				t.Errorf("override entry header uid/gid = %d/%d, want %d/%d (from live file)",
+					hdr.Uid, hdr.Gid, wantUid, wantGid)
+			}
+			// Sanity: content should be the override's bytes, not live.
+			data, _ := io.ReadAll(tr)
+			if string(data) != "SNAPSHOTTED" {
+				t.Errorf("override content = %q, want %q", data, "SNAPSHOTTED")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("data/live.db not found in archive")
 	}
 }
