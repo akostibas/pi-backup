@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,6 +21,8 @@ type Config struct {
 	Bucket      string      `yaml:"bucket"`
 	Region      string      `yaml:"region"`
 	Directories []Directory `yaml:"directories"`
+	// Public key only: the host can write backups it cannot read back.
+	AgeRecipient string `yaml:"age_recipient,omitempty"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -41,6 +44,11 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Region == "" {
 		return nil, fmt.Errorf("config: region is required")
+	}
+	if cfg.AgeRecipient != "" {
+		if _, err := age.ParseX25519Recipient(cfg.AgeRecipient); err != nil {
+			return nil, fmt.Errorf("config: age_recipient: %w", err)
+		}
 	}
 	if len(cfg.Directories) == 0 {
 		return nil, fmt.Errorf("config: at least one directory is required")
