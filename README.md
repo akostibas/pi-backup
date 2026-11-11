@@ -20,6 +20,8 @@ directories:
   - /opt/jellyfin/config
 ```
 
+Optional `age_recipient: age1...` encrypts every archive with [age](https://age-encryption.org) before upload (keys end in `.tar.gz.age`). Put only the public key on the host: it can then write backups but not read them, and restores need the private key passed with `--identity`. Losing the private key makes those backups unrecoverable. Generate a pair with `age-keygen`.
+
 AWS credentials must be set as environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`). When running via systemd, use an `EnvironmentFile`.
 
 ## Systemd
@@ -65,7 +67,10 @@ pi-backup restore /opt/pihole/etc-pihole        # restore latest
 pi-backup restore /opt/pihole/etc-pihole --snapshot 2026-02-11T03-00-00Z
 pi-backup restore /opt/pihole/etc-pihole --file etc-pihole/pihole-FTL.conf
 pi-backup restore /opt/pihole/etc-pihole --dest /tmp/restore
+pi-backup restore /opt/pihole/etc-pihole --identity key.txt    # encrypted backups
 ```
+
+`--identity /dev/stdin` reads the private key from a pipe, so it never has to touch the host's disk.
 
 ## Skip-unchanged optimization
 

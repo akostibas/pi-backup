@@ -76,6 +76,9 @@ func main() {
 
 	for _, d := range cfg.Directories {
 		key := S3Key(cfg.Hostname, d.Path, now)
+		if cfg.AgeRecipient != "" {
+			key += ".age"
+		}
 		slug := PathSlug(d.Path)
 
 		archivePath, hash, err := createArchiveWithHash(d)
@@ -83,6 +86,10 @@ func main() {
 			log.Printf("error creating archive for %s: %v", d.Path, err)
 			failed = append(failed, d.Path)
 			continue
+		}
+		// Changing the key must force a re-upload, or unchanged dirs stay readable only with the old one.
+		if cfg.AgeRecipient != "" {
+			hash += " age:" + cfg.AgeRecipient
 		}
 
 		if checksums[slug] == hash {
@@ -176,5 +183,12 @@ func uploadArchive(ctx context.Context, cfg *Config, key, archivePath string) er
 	}
 	defer f.Close()
 
-	return UploadToS3(ctx, cfg.Region, cfg.Bucket, key, f)
+	if cfg.AgeRecipient == "" {
+		return UploadToS3(ctx, cfg.Region, cfg.Bucket, key, f)
+	}
+	r, err := encryptStream(f, cfg.AgeRecipient)
+	if err != nil {
+		return err
+	}
+	return UploadToS3(ctx, cfg.Region, cfg.Bucket, key, r)
 }

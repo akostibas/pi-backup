@@ -67,6 +67,21 @@ func FindLatestBackup(ctx context.Context, cfg *Config, dir string) (string, err
 	return keys[len(keys)-1], nil
 }
 
+// findSnapshot returns the key for a timestamp, whether or not it was encrypted.
+func findSnapshot(ctx context.Context, cfg *Config, dir, ts string) (string, error) {
+	keys, err := ListBackups(ctx, cfg, dir)
+	if err != nil {
+		return "", err
+	}
+	base := fmt.Sprintf("%s/%s/%s.tar.gz", cfg.Hostname, PathSlug(dir), ts)
+	for _, k := range keys {
+		if k == base || k == base+".age" {
+			return k, nil
+		}
+	}
+	return "", fmt.Errorf("no snapshot %s for %s", ts, dir)
+}
+
 // DownloadFromS3 downloads an object from S3 and writes it to w.
 func DownloadFromS3(ctx context.Context, region, bucket, key string, w io.Writer) error {
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
@@ -176,7 +191,11 @@ func ExtractArchive(r io.Reader, destDir, fileFilter string) error {
 }
 
 // RestoreBackup downloads a backup from S3 and extracts it.
-func RestoreBackup(ctx context.Context, cfg *Config, key, destDir, fileFilter string) error {
+func RestoreBackup(ctx context.Context, cfg *Config, key, destDir, fileFilter, identityPath string) error {
+	if isEncryptedKey(key) && identityPath == "" {
+		return fmt.Errorf("%s is encrypted: pass --identity <file> with the age private key", key)
+	}
+
 	tmpFile, err := os.CreateTemp("", "pi-restore-*.tar.gz")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
@@ -193,15 +212,23 @@ func RestoreBackup(ctx context.Context, cfg *Config, key, destDir, fileFilter st
 		return fmt.Errorf("seeking temp file: %w", err)
 	}
 
+	var r io.Reader = tmpFile
+	if isEncryptedKey(key) {
+		var err error
+		if r, err = decryptStream(tmpFile, identityPath); err != nil {
+			return err
+		}
+	}
+
 	log.Printf("extracting to %s", destDir)
-	return ExtractArchive(tmpFile, destDir, fileFilter)
+	return ExtractArchive(r, destDir, fileFilter)
 }
 
 // runRestore handles the "restore" subcommand.
 func runRestore(cfg *Config, args []string) {
 	if len(args) == 0 {
 		fmt.Fprintf(os.Stderr, "Usage: pi-backup restore list [<directory>]\n")
-		fmt.Fprintf(os.Stderr, "       pi-backup restore <directory> [--snapshot <TS>] [--file <path>] [--dest <dir>]\n")
+		fmt.Fprintf(os.Stderr, "       pi-backup restore <directory> [--snapshot <TS>] [--file <path>] [--dest <dir>] [--identity <file>]\n")
 		os.Exit(1)
 	}
 
@@ -238,13 +265,17 @@ func runRestore(cfg *Config, args []string) {
 	snapshot := fs.String("snapshot", "", "restore a specific snapshot (timestamp like 2026-02-11T03-00-00Z)")
 	fileFilter := fs.String("file", "", "extract only this file from the archive")
 	dest := fs.String("dest", "", "extract to alternate location (default: parent of directory)")
+	identity := fs.String("identity", "", "age private key file for encrypted backups (/dev/stdin to pipe it in)")
 	fs.Parse(args[1:])
 
 	// Determine the S3 key
 	var key string
 	if *snapshot != "" {
-		slug := PathSlug(dir)
-		key = fmt.Sprintf("%s/%s/%s.tar.gz", cfg.Hostname, slug, *snapshot)
+		var err error
+		key, err = findSnapshot(ctx, cfg, dir, *snapshot)
+		if err != nil {
+			log.Fatalf("error: %v", err)
+		}
 	} else {
 		var err error
 		key, err = FindLatestBackup(ctx, cfg, dir)
@@ -259,7 +290,7 @@ func runRestore(cfg *Config, args []string) {
 		destDir = *dest
 	}
 
-	if err := RestoreBackup(ctx, cfg, key, destDir, *fileFilter); err != nil {
+	if err := RestoreBackup(ctx, cfg, key, destDir, *fileFilter, *identity); err != nil {
 		log.Fatalf("error: %v", err)
 	}
 
